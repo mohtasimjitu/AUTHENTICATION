@@ -1,0 +1,21 @@
+{
+  "provider": "keyauth",
+  "keyauth": {
+    "name": "SOJIB",
+    "ownerid": "Q1Mo4HyXrV",
+    "secret": "05f9a211fc280c85cc751032c9cb182d9fe8d399c57fc1009457080bef1487c4",
+    "version": "1.0"
+  },
+  "database": {
+    "host": "https://myserver.com/api/",
+    "apikey": "abcd1234"
+  }
+
+}
+
+
+
+
+
+
+
