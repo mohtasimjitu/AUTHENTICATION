@@ -1,1 +1,16 @@
-
+{
+  "executables": [
+    {
+      "name": "AotBst.dll",
+      "sha256": "3f786850e387550fdab836ed7e6dc881de23001b9a0f4d6f7a64de79539f1c5c"
+    },
+    {
+      "name": "cimgui",
+      "sha256": "9b74c9897bac770ffc029102a200c5de8d5e7e8f7ff7f6ba6748b6ff1571318c"
+    },
+    {
+      "name": "Client",
+      "sha256": "917c82cd5ce65581f43b8b204a2adb25a9a4d2bd15da1a38efd190d904091e42"
+    }
+  ]
+}
